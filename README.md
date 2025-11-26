@@ -40,6 +40,12 @@ Provides optocoupler switch emulation, RS232 diagnostics, wall-switch inputs and
 > **Do NOT power from USB and RJ9 at the same time.** Removing one source before applying the other is mandatory to avoid damage.
 ---
 
+## Software
+- ESP32 is able to communicate with MVHR unit using forked version of alextrical's ESPHome component and read information shown on the unit's display
+- All available information in diagnostics menu can be found [**here**](https://github.com/aelias-eu/vent-axia-remote/blob/main/docs/sentinel_kinetic-Diagnostic_Display.pdf)
+- [Example ESPHome configs](https://github.com/setrin/ESPRekupV2/tree/master/esphome_configs)
+---
+
 ## ESP32-C3 Pin-out
 - GPIO0 -> Opto-coupuler Low mode
 - GPIO1 -> Opto-coupuler Medium / Normal mode
