@@ -4,7 +4,7 @@ substitutions:
   log_level: DEBUG
 
 dashboard_import:
-  package_import_url: github://setrin/ESPRecupV2/esphome-configs/ESPRecupV2-Full.yaml
+  package_import_url: github://setrin/ESPRecupV2/esphome_configs/ESPRecupV2-Full.yaml@latest
   import_full_config: true
 
 packages:
