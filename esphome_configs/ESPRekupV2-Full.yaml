@@ -1,0 +1,12 @@
+substitutions:
+  name: "esprecup-v2-full"
+  friendly_name: "ESPRecupV2-Full"
+  log_level: DEBUG
+
+dashboard_import:
+  package_import_url: github://setrin/ESPRecupV2/esphome-configs/ESPRecupV2-Full.yaml
+  import_full_config: true
+
+packages:
+  device_base: !include common/esprekupv2-base.yaml
+  full_binary_sensors: !include common/full_binary_sensors.yaml

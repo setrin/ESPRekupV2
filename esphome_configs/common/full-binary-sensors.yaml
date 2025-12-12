@@ -1,0 +1,47 @@
+# Buttons input
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO5
+      mode: INPUT_PULLUP
+    filters:
+      - invert:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    name: "Low Mode Button"
+    id: low_button
+    on_press:
+      then:
+        - select.set:
+            id: vent_mode
+            option: "Low"
+  - platform: gpio
+    pin:
+      number: GPIO6
+      mode: INPUT_PULLUP
+    filters:
+      - invert:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    name: "Med Mode Button"
+    id: med_button
+    on_press:
+      then:
+        - select.set:
+            id: vent_mode
+            option: "Medium"
+  - platform: gpio
+    pin:
+      number: GPIO7
+      mode: INPUT_PULLUP
+    filters:
+      - invert:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    name: "High Mode Button"
+    id: high_button
+    on_press:
+      then:        
+        - select.set:
+            id: vent_mode
+            option: "High"

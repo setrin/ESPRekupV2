@@ -1,0 +1,11 @@
+substitutions:
+  name: "esprecup-v2-mini"
+  friendly_name: "ESPRecupV2-Mini"
+  log_level: DEBUG
+
+dashboard_import:
+  package_import_url: github://setrin/ESPRecupV2/esphome-configs/ESPRecupV2-Mini.yaml
+  import_full_config: true
+
+packages:
+  device_base: !include common/esprekupv2-base.yaml
