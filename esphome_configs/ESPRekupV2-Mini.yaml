@@ -1,11 +1,503 @@
+#TODO: Fix Diagnostic length useage
 substitutions:
   name: "esprecup-v2-mini"
   friendly_name: "ESPRecupV2-Mini"
+  diagnostic: "Diagnostic" # Diagnostic line
+  manual: "Manual" # MVHR Line 2 when mode is set manually
+  auto_mode: "Auto" # MVHR Line 2 when mode is set automatically (default or unit's schedule)
+  low_mode: "Low"  # MVHR Line 1 Low Mode
+  normal_mode: "Normal" # MVHR Line 1 Normal Mode
+  boost_mode: "Boost" # MVHR Line 1 Boost Mode
+  boost_mode_timer: "Boost - Timer" # MVHR Line 1 + Timer
   log_level: DEBUG
 
-dashboard_import:
-  package_import_url: github://setrin/ESPRecupV2/esphome_configs/ESPRecupV2-Mini.yaml@latest
-  import_full_config: true
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
 
-packages:
-  device_base: !include common/esprekupv2-base.yaml
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+  level: ${log_level}
+
+api:
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+wifi:
+
+improv_serial:
+
+esp32_improv:
+  authorizer: none
+
+captive_portal:
+
+uart:
+  tx_pin: 21
+  rx_pin: 20
+  baud_rate: 9600
+  id: vask_uart
+
+i2c:
+  sda: GPIO8
+  scl: GPIO9
+  scan: false
+  id: i2c_bus
+
+external_components:
+  - source: github://setrin/ESPHome-Vent-Axia-Sentinel-Kinetic/@latest
+
+globals:
+  - id: prev_mode
+    type: std::string
+    restore_value: false
+  - id: boost_timer_active
+    type: bool
+    restore_value: false
+
+vent_axia_sentinel_kinetic:
+  - id: vask
+    uart_id: vask_uart
+    line1:
+      id: line_1
+      name: "Line 1"
+      icon: "mdi:text-short"
+      on_value:
+        then:
+          - lambda: |-
+              if (x.rfind("${low_mode}", 0) == 0) {
+                id(current_mode).publish_state("Low");
+              } else if (x.rfind("${normal_mode}", 0) == 0) {
+                id(current_mode).publish_state("Normal");
+              } else if (x.rfind("${boost_mode}", 0) == 0){
+                id(current_mode).publish_state("Boost");
+              } else {
+                id(current_mode).publish_state("N/A");
+              }
+    line2:
+      id: line_2
+      name: "Line 2"
+      icon: "mdi:text-short"
+      on_value:
+        then:
+          - lambda: |-
+              if (id(line_1).state.find("${diagnostic}", 0) == 0) {
+                  switch (std::stoi(id(line_1).state.substr(12, 2))) {
+                      case 0:
+                          id(supply_fan_speed).publish_state(std::stoi(x.substr(0, 3)));
+                          id(supply_pwm).publish_state(std::stoi(x.substr(4, 3)));
+                          id(supply_rpm).publish_state(std::stoi(x.substr(10, 4)));
+                          break;
+                      case 1:
+                          id(extract_fan_speed).publish_state(std::stoi(x.substr(0, 3)));
+                          id(extract_pwm).publish_state(std::stoi(x.substr(4, 3)));
+                          id(extract_rpm).publish_state(std::stoi(x.substr(10, 4)));
+                          break;
+                      case 2:
+                          id(supply_temp_sensor).publish_state(std::stoi(x.substr(1, 2)));
+                          break;
+                      case 3:
+                          id(extract_temp_sensor).publish_state(std::stoi(x.substr(1, 2)));                          
+                          break;
+                      case 23:
+                          id(filter_hours_remain).publish_state(std::stoi(x.substr(0, 5)));                        
+                          break;
+                      default:
+                          // Handle other cases
+                          break;
+                  }
+              }
+
+script:
+  - id: enter_and_run_diagnostic
+    mode: single
+    then:
+      - logger.log: 'Entering diagnostics'
+      - switch.turn_off: down_sw
+      - switch.turn_off: set_sw
+      - if:
+          condition:
+            lambda: 'return id(line_1).state.find("${diagnostic}", 0) == std::string::npos;'
+          then:
+            - switch.turn_on: up_sw
+            - switch.turn_on: main_sw
+            - wait_until:
+                condition:
+                  lambda: 'return id(line_1).state.find("${diagnostic}", 0) == 0;'
+                timeout: 8s
+            - switch.turn_off: up_sw
+            - switch.turn_off: main_sw
+            - logger.log: 'Should be in the diagnostics'
+      - while:
+          condition:
+            lambda: |-
+              return true;
+          then:
+            - switch.turn_on: down_sw
+            - wait_until:
+                condition:
+                  lambda: 'return std::stoi(id(line_1).state.substr(12, 2)) > 23;'
+                timeout: 8s
+            - switch.turn_off: down_sw
+            - switch.turn_on: up_sw
+            - wait_until:
+                condition:
+                  lambda: 'return std::stoi(id(line_1).state.substr(12, 2)) == 0;'
+                timeout: 8s
+            - switch.turn_off: up_sw
+  - id: exit_diagnostic
+    mode: single
+    then:
+      - switch.turn_on: up_sw #Scroll up until we see Diagnostic 0
+      - switch.turn_off: down_sw
+      - switch.turn_off: set_sw
+      - switch.turn_off: main_sw
+      - wait_until:
+          condition:
+            lambda: 'return std::stoi(id(line_1).state.substr(12, 2)) == 0;'
+          timeout: 8s
+      - switch.turn_off: up_sw
+      - delay: 50ms
+      - switch.turn_on: up_sw
+      - wait_until:
+          condition:
+            lambda: 'return id(line_1).state.find("${diagnostic}", 0) == std::string::npos;'
+          timeout: 8s
+      - switch.turn_off: up_sw
+  - id: change_mode_opto
+    mode: single
+    parameters: 
+      new_mode: string
+    then:
+      - logger.log:
+          format: "Changing mode (using optos) to: %s"
+          args: [ 'new_mode.c_str()' ]
+      - output.turn_off: out_relay_low
+      - output.turn_off: out_relay_norm
+      - output.turn_off: out_relay_boost
+      - lambda: |-
+          if (new_mode == "${low_mode}") {
+            id(out_relay_low).turn_on();
+          } else if (new_mode == "${normal_mode}") {
+            id(out_relay_norm).turn_on();
+          } else if (new_mode == "${boost_mode}") {
+            id(out_relay_boost).turn_on();
+          }
+  - id: change_mode_mainbutton
+    mode: restart
+    parameters:
+      new_mode: string
+    then:
+      - if:
+          condition:
+            lambda: |-
+              if (new_mode == "${auto_mode}") {
+                return id(line_2).state.find("${auto_mode}") != std::string::npos;
+              } else {
+                return id(line_1).state.rfind(new_mode, 0) == 0 && id(line_2).state.find("${manual}") != std::string::npos;
+              }
+          then:
+            - logger.log: "Target mode reached"
+          else:
+            - button.press: btn_main
+            - delay: 1s
+            - script.execute:
+                id: change_mode_mainbutton
+                new_mode: !lambda 'return new_mode;'
+  - id: boost_timer
+    mode: restart
+    then:
+      - logger.log:
+          format: "Boost timer started for %.0f minutes"
+          args: [ 'id(boost_timer_minutes).state' ]
+      - globals.set:
+          id: boost_timer_active
+          value: 'true'
+      - delay: !lambda 'return (uint32_t)(id(boost_timer_minutes).state * 60 * 1000);'
+      - if:
+          condition:
+            lambda: 'return id(boost_timer_active);'
+          then:
+            - logger.log:
+                format: "Boost timer expired, restoring previous mode: %s"
+                args: [ 'id(prev_mode).c_str()' ]
+            - select.set:
+                id: vent_mode
+                option: !lambda 'return id(prev_mode);'
+            - globals.set:
+                id: boost_timer_active
+                value: 'false'
+
+output:
+  - platform: gpio
+    pin: GPIO0
+    id: out_relay_low
+    inverted: false
+  - platform: gpio
+    pin: GPIO1
+    id: out_relay_norm
+    inverted: false
+  - platform: gpio
+    pin: GPIO3
+    id: out_relay_boost
+    inverted: false
+
+switch:
+  - platform: vent_axia_sentinel_kinetic
+    up:
+      id: up_sw
+      #name: "Up"
+      entity_category: config
+      icon: "mdi:menu-up"
+    down:
+      id: down_sw
+      #name: "Down"
+      entity_category: config
+      icon: "mdi:menu-down"
+    set:
+      id: set_sw
+      #name: "Set"
+      entity_category: config
+      icon: "mdi:menu-right"
+    main:
+      id: main_sw
+      #name: "Main"
+      entity_category: config
+      icon: "mdi:fan"
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode: INPUT_PULLUP
+    filters:
+      - invert:
+      - delayed_on: 200ms
+      - delayed_off: 200ms
+    name: "Impulse Switch"
+    id: sw_button
+    on_press:
+      then:
+        - select.set:
+            id: vent_mode
+            option: ${boost_mode_timer}
+
+button:
+  - platform: template
+    name: "Up"
+    id: btn_up
+    on_press:
+      - switch.turn_on: up_sw
+      - delay: 50ms
+      - switch.turn_off: up_sw
+    icon: "mdi:menu-up-outline"
+  - platform: template
+    name: "Down"
+    id: btn_down
+    on_press:
+      - switch.turn_on: down_sw
+      - delay: 50ms
+      - switch.turn_off: down_sw
+    icon: "mdi:menu-down-outline"
+  - platform: template
+    name: "Set"
+    id: btn_set
+    on_press:
+      - switch.turn_on: set_sw
+      - delay: 50ms
+      - switch.turn_off: set_sw
+    icon: "mdi:menu-right-outline"
+  - platform: template
+    name: "Main"
+    id: btn_main
+    on_press:
+      - switch.turn_on: main_sw
+      - delay: 50ms
+      - switch.turn_off: main_sw
+    icon: "mdi:fan"
+  - platform: template
+    id: diagnostic_on
+    name: "Diagnostic On"
+    icon: "mdi:stethoscope"
+    on_press:
+      - script.execute: enter_and_run_diagnostic
+  - platform: template
+    id: diagnostic_off
+    name: "Diagnostic Off"
+    icon: "mdi:stethoscope"
+    on_press:
+      - script.stop: enter_and_run_diagnostic
+      - script.execute: exit_diagnostic
+    # Create a button to restart the unit from HomeAssistant. Rarely needed, but can be handy.
+  - platform: restart
+    name: "Restart"
+
+sensor:
+  - platform: template
+    id: extract_fan_speed
+    name: "Extract Fan Speed"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    state_class: measurement
+    update_interval: never
+  - platform: template
+    id: supply_fan_speed
+    name: "Supply Fan Speed"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    state_class: measurement
+    update_interval: never
+  - platform: template
+    id: supply_temp_sensor
+    name: "Supply Temperature"
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:home-thermometer-outline"
+  - platform: template
+    id: extract_temp_sensor
+    name: "Extract Temperature"
+    accuracy_decimals: 0
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:sun-thermometer-outline"
+  - platform: template
+    id: supply_rpm
+    name: "Supply Speed"
+    accuracy_decimals: 0
+    unit_of_measurement: "RPM"
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:fan-speed-1"
+  - platform: template
+    id: extract_rpm
+    name: "Extract Speed"
+    accuracy_decimals: 0
+    unit_of_measurement: "RPM"
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:fan-speed-2"
+  - platform: template
+    id: supply_pwm
+    name: "Supply PWM"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:fan-speed-1"
+  - platform: template
+    id: extract_pwm
+    name: "Extract PWM"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:fan-speed-2"
+  - platform: template
+    id: filter_hours_remain
+    name: "Remaining Filter Hours"
+    accuracy_decimals: 0
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: measurement
+    update_interval: never
+    icon: "mdi:clock-outline"
+  # Uptime sensor.
+  - platform: uptime
+    name: Uptime
+  # WiFi Signal sensor.
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 120s
+
+text_sensor:
+  - platform: template
+    id: current_mode
+    name: "Current Mode"
+    update_interval: never
+    icon: "mdi:sign-text"
+
+number:
+  - platform: template
+    name: "Boost Timer"
+    id: boost_timer_minutes
+    min_value: 1
+    max_value: 60
+    step: 1
+    unit_of_measurement: "min"
+    initial_value: 10
+    restore_value: true
+    optimistic: true
+    mode: AUTO
+
+select:
+  - platform: template
+    name: "Vent Mode"
+    id: vent_mode
+    optimistic: true
+    restore_value: true
+    options:
+      - ${auto_mode}
+      - ${low_mode}
+      - ${normal_mode}
+      - ${boost_mode}
+      - ${boost_mode_timer}
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(boost_timer_active) && x != "${boost_mode_timer}";'
+            then: 
+              # - logger.log:
+              #     format: "Stopping Boost timer due to interrupt: %s"
+              #     args: [ 'x.c_str()' ]           
+              - script.stop: boost_timer
+              - globals.set:
+                  id: boost_timer_active
+                  value: 'false'
+              
+        - if:
+            condition:
+              lambda: 'return x == "${boost_mode_timer}";'
+            then:
+              - script.execute:
+                  id: boost_timer
+            else:
+              - globals.set:
+                  id: prev_mode
+                  value: !lambda 'return x;'
+              - logger.log:
+                  format: "Setting previous mode: %s"
+                  args: [ 'x.c_str()' ]
+        - if:
+            condition:
+              lambda: 'return id(control_mode).current_option() == "Optocouplers";'
+            then:
+              - script.execute:
+                  id: change_mode_opto
+                  new_mode: !lambda 'return x == "${boost_mode_timer}" ? "${boost_mode}" : x;'
+            else:
+              - script.execute:
+                  id: change_mode_mainbutton
+                  new_mode: !lambda 'return x == "${boost_mode_timer}" ? "${boost_mode}" : x;'
+  - platform: template
+    id: control_mode
+    name: "Control Mode"
+    icon: "mdi:chip"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - "Optocouplers"
+      - "Simulating"
